@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+
+<launch>
+
+  <!-- pcd pole segmentation -->
+  <node name="cy_segmentation" pkg="bachelor_thesis" type="cy_segmentation" output="screen"> <!-- pole_segmentation or test_node--> <!--  launch-prefix="valgrind" -->
+    <remap from="input" to="D435/camera/depth_registered/points"/> 
+    <!-- real camera: /camera/depth/color/points and different axis!--> 
+    <!-- simulation camera: D435/camera/depth_registered/points and different axis! --> 
+  </node>
+
+    <!-- droping messages (9 out of 10) -->
+  <node name="pointcloud_dropper" type="drop" pkg="topic_tools" args="D435/camera/depth_registered/points 9 10" />
+
+  <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="tf_camera" args="0.18 0.0 -0.15 0.5 -0.5 -0.5 0.5  boreas/base_link color" /> -->
+  <node pkg="tf2_ros" type="static_transform_publisher" name="tf_camera" args="0.18 0.0 -0.15 -0.1043257 0.1853825 0.088845 0.9730653 boreas/base_link color" /> 
+
+</launch>
+
+<!-- rosnode: publish coordinates -->

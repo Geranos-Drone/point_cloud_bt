@@ -17,6 +17,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   std_msgs
   genmsg
+  message_generation
   pcl_ros 
   sensor_msgs 
   ##PCL REQUIRED 
@@ -68,12 +69,12 @@ find_package(Eigen3 REQUIRED)
 # )
 
 ## Generate services in the 'srv' folder
-# add_service_files(
-#   FILES
-#   Service1.srv
+add_service_files(
+  FILES
+  PoleDet.srv
 #   Service2.srv
-# )
-generate_messages(DEPENDENCIES std_msgs)
+)
+
 ## Generate actions in the 'action' folder
 # add_action_files(
 #   FILES
@@ -82,10 +83,10 @@ generate_messages(DEPENDENCIES std_msgs)
 # )
 
 ## Generate added messages and services with any dependencies listed here
-# generate_messages(
-#   DEPENDENCIES
-#   std_msgs
-# )
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+)
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##
@@ -119,7 +120,7 @@ generate_messages(DEPENDENCIES std_msgs)
 catkin_package(
   INCLUDE_DIRS include
 #  LIBRARIES bachelor_thesis
-#  CATKIN_DEPENDS roscpp rospy std_msgs
+  CATKIN_DEPENDS roscpp rospy std_msgs message_runtime
 #  DEPENDS system_lib
 )
 
@@ -130,6 +131,15 @@ add_dependencies(cy_segmentation bachelor_thesis_gencpp)
 
 add_executable(pole_seg src/pole_seg.cpp)
 target_link_libraries(pole_seg ${catkin_LIBRARIES})
+
+add_executable(coordinates_pub src/coordinates_pub.cpp)
+target_link_libraries(coordinates_pub ${catkin_LIBRARIES})
+
+add_executable(simple_service_server src/simple_service_server.cpp)
+target_link_libraries(simple_service_server ${catkin_LIBRARIES})
+ 
+add_executable(simple_service_client src/simple_service_client.cpp)
+target_link_libraries(simple_service_client ${catkin_LIBRARIES})
 
 ###########
 ## Build ##

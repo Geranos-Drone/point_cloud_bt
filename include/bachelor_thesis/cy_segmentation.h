@@ -2,18 +2,19 @@
 #define POLE_SEG_H
 
 #include <ros/ros.h>
+#include <chrono>
+#include <sensor_msgs/PointCloud2.h>
+
+//PCL
 #include <pcl/PCLPointCloud2.h>
 #include <pcl/ModelCoefficients.h>
 #include <pcl/point_types.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/passthrough.h>
 #include <pcl/segmentation/sac_segmentation.h>
-#include <sensor_msgs/PointCloud2.h>
-
 #include <pcl/features/normal_3d.h>
 #include <pcl/conversions.h>
 #include <pcl_conversions/pcl_conversions.h>
-#include <chrono>
 #include <pcl/filters/extract_indices.h>
 
 // Transform listener
@@ -24,6 +25,9 @@
 //Service
 #include <std_srvs/Empty.h>
 #include <cstdlib>
+#include <ros/service_traits.h>
+#include "bachelor_thesis/PoleDet.h"
+
 /*
 #include <sensor_msgs/NavSatFix.h>
 #include <pcl/io/pcd_io.h>
@@ -49,11 +53,18 @@ class POLE_SEG
   using PointTPtr = typename pcl::PointCloud<PointT>::Ptr;
 
 public:
+  /*  POLE_SEG(const ros::NodeHandle& nh, const ros::NodeHandle& private_nh);
+    ~POLE_SEG();
+
+
+private: */
     pcl::PCDWriter writer_;
     int cylinder_number_ = 0; //current number of cylinder 
     Eigen::Vector4f plane_coeff_;
     int anzahl_cylinder_; //number of possibly correct cylinders found
     bool callback_called_once_ = 0;
+    int service_call_ = 0;
+    Eigen::Vector3d coordinates_;
 
     pcl::PCLPointCloud2 pcl_pc2;
     pcl::PointCloud<PointT>::Ptr cloud {new pcl::PointCloud<PointT>};
@@ -81,6 +92,7 @@ public:
     pcl::PointIndices::Ptr inliers_cylinder_5 {new pcl::PointIndices};
     pcl::PointIndices::Ptr inliers_cylinder_6 {new pcl::PointIndices}; 
 
+    sensor_msgs::PointCloud2::ConstPtr cloud_from_camera_;                                
 
 
     pcl::PointIndices::Ptr inliers_plane {new pcl::PointIndices};
@@ -96,31 +108,36 @@ public:
     pcl::PointXYZRGB point_minmax_4_; //extreme point of 4th cylinder which is closer to plane
     pcl::PointXYZRGB point_minmax_5_; //extreme point of 5th cylinder which is closer to planed
 
-    int current_cylinder_; //current number of cylinder 
+    int current_cylinder_ = 0; //current number of cylinder 
     pcl::PointXYZRGB point_ontop_; //extreme point of current cylinder which is closer to plane
     float radius_kdtree_; //radius used for kdtree (freestanding pole criteria)
     float length_axis_real_; //projected length
     int cylinder_found_pole_ = 0; //depending on value cylinder found could be the pole or not
-    int pointminmax_;
+    int pointlowest_;
+    int pointhighest_;
+
     Eigen::VectorXf radius_ = Eigen::VectorXf::Zero(7); //radius of cylinders
     Eigen::VectorXf cylinder_red_or_green_ = Eigen::VectorXf::Zero(7); //0 if red and 1 if green
 
     //tf
     tf::TransformListener tf_listener_;
     Eigen::Affine3d T_B_color_;
+    ros::NodeHandle nh_;
+    ros::Publisher pub_;
+
+    //Service
+    ros::ServiceServer service_;
 
     //functions
     void callback_(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd);
-    void segmentation_(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd);
+    //void segmentation_(); //const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd);
     void tf_transformer(const pcl::PointXYZRGB& point_on_pole);
     int cylinder_found_(const pcl::PointCloud<PointT>::Ptr &cloud_cylinder, pcl::ModelCoefficients::Ptr &coefficients_cylinder);
     void cylinder_can_be_pole_(const pcl::PointCloud<PointT>::Ptr &cloud_cylinder);
     void color_only_cylinders_(const pcl::PointCloud<PointT>::Ptr &cloud_0,const pcl::PointCloud<PointT>::Ptr &cloud_1,const pcl::PointCloud<PointT>::Ptr &cloud_2,const pcl::PointCloud<PointT>::Ptr &cloud_3,const pcl::PointCloud<PointT>::Ptr &cloud_4,const pcl::PointCloud<PointT>::Ptr &cloud_5,const pcl::PointCloud<PointT>::Ptr &cloud_6);
-  
-    //GUI Service
-    ros::NodeHandle nh_;
-    ros::ServiceClient pole_detection_;
-
+    bool PoleDet(bachelor_thesis::PoleDet::Request  &req, bachelor_thesis::PoleDet::Response &res);
+    bool StopService_(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response);
+    void publisher_function_();
 };
 
 #endif

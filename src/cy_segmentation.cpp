@@ -7,47 +7,31 @@ using namespace std::chrono;
 typedef pcl::PointXYZRGB PointT;
 typedef pcl::PointXYZ PointXYZ;
 
-
-//switch_param_client_ = nh_.serviceClient<std_srvs::Empty>("impedance_module/switch_control_params");
-//        PoleDet_service = rospy.ServiceProxy('/bachelor_thesis/detection_node', PoleDetetion)
-//pole_det = nh_.serviceClient<std_srvs::Empty>("bachelor_thesis/detection_node")
-
+//called everytime subscriber receeives messages and converted into a Pointcloud
 void POLE_SEG::callback_(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd){                                
-  std_srvs::Empty pole_det;
-  ROS_WARN_STREAM("In callback");
-  
-  pole_detection_ = nh_.serviceClient<std_srvs::Empty>("bachelor_thesis/detection_node");
-  
-  if (pole_detection_.call(pole_det)) 
-  {
-    std::cerr << "yes";
-    ROS_WARN_STREAM("Service received!");
-  }
-
-  if(!callback_called_once_) {
-    segmentation_(cloud_pcd);
-  }
-  else {
-    return;
-  }
-
+  cloud_from_camera_ = cloud_pcd;
 }
-//function called from subscriber
-//first converts sensor_message to point cloud
-//Afterwards pland and cylinder segmentation
-void POLE_SEG::segmentation_(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd){                                
 
-  ROS_ERROR_STREAM ("Cylinder is being segmented - start point");
+//function called from service
+//first filtering, then plane and cylinder segmentation
+bool POLE_SEG::PoleDet(bachelor_thesis::PoleDet::Request  &req, bachelor_thesis::PoleDet::Response &res){ //const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd){                              
 
   //converts sensor_msgs to pointcloud
-  pcl_conversions::toPCL(*cloud_pcd,pcl_pc2); //Googlen
+  pcl_conversions::toPCL(*cloud_from_camera_,pcl_pc2);
   pcl::fromPCLPointCloud2(pcl_pc2,*cloud);
-  std::cerr << "PointCloud has: " << cloud->size () << " data points." << std::endl;
+
+  ROS_ERROR_STREAM ("Cylinder is being segmented - start point");  
+  //converts sensor_msgs to pointcloud
+/*  pcl_conversions::toPCL(*cloud_pcd,pcl_pc2);
+  pcl::fromPCLPointCloud2(pcl_pc2,*cloud);
+  std::cerr << "PointCloud has: " << cloud->size () << " data points." << std::endl; */
+  
+  std::cerr << "SERVICE: PointCloud has: " << cloud->size () << " data points." << std::endl;
 
   if(cloud->points.empty ()) { //if received pcd_cloud empty end callback function and wait until cloud is not empty anymore
     ROS_ERROR("Empty cloud");
     //OUTPUT SOMETHING
-    return;
+    return false;
   }
 
   /////////////////////////// Passthrough Filter ///////////////////////////
@@ -61,7 +45,7 @@ void POLE_SEG::segmentation_(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd
   if(cloud_filtered->points.empty ()) { //if received pcd_cloud empty end callback function and wait until cloud is not empty anymore
     ROS_ERROR("Empty cloud");
     //OUTPUT SOMETHING
-    return; // (point_xyz);
+    return false; // (point_xyz);
   }
 
 /////////////////////////// Voxelgrid filter to reduce cloud size (~number is cut in half) ///////////////////////////
@@ -86,10 +70,10 @@ void POLE_SEG::segmentation_(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd
   seg.setMaxIterations (10000);
 
   //Axis of normal plane vector (25 degrees looking down on Boreas)
-  double angle_plane = 0.05;
+  double angle_plane = 0.05; //~ 6 degree offset possible
   seg.setEpsAngle(angle_plane);
   Eigen::Vector3f axis_plane;
-  axis_plane << 0.0, 1, 0.2; //Simulation axis
+  axis_plane << 0.0, 0.98, 0.2; //Simulation axis
   seg.setAxis (axis_plane);
 
   seg.setDistanceThreshold (0.1); //Distance to the model threshold (user given parameter).
@@ -97,10 +81,7 @@ void POLE_SEG::segmentation_(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd
   seg.setInputNormals (cloud_normals);
   // Obtain the plane inliers and coefficients
   seg.segment (*inliers_plane,*coefficients_plane);
-  std::cerr << "okay 4";
-
   plane_coeff_ << coefficients_plane->values[0], coefficients_plane->values[1], coefficients_plane->values[2], coefficients_plane->values[3];
-  std::cerr << "plane_coeff_" << plane_coeff_;
 
   // Extract the planar inliers from the input cloud
   extract.setInputCloud (cloud_filtered_voxel);
@@ -114,7 +95,7 @@ void POLE_SEG::segmentation_(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd
   if(cloud_plane->points.empty ()) { //if received pcd_cloud empty end callback function and wait until cloud is not empty anymore
     ROS_ERROR("Empty plane-cloud");
     //OUTPUT SOMETHING
-    return; //(point_xyz);
+    return false; //(point_xyz);
   }
   
   // Remove the planar inliers, extract the rest
@@ -131,7 +112,7 @@ void POLE_SEG::segmentation_(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd
   if(cloud_filtered2->points.empty ()) { //if received pcd_cloud empty end callback function and wait until cloud is not empty anymore
     ROS_ERROR("Empty cloud_filtered2-cloud");
     //OUTPUT SOMETHING
-    return; // (point_xyz);
+    return false; // (point_xyz);
   }
 
   // Create the segmentation object for cylinder segmentation and set all the parameters
@@ -143,7 +124,7 @@ void POLE_SEG::segmentation_(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd
   seg.setMaxIterations (500000); //maybe even higher, however higher number -> more time...
 
   //Axis of cylinder parallel to normal plane vector
-  double angle = 0.1; //~ 2degree offset possible
+  double angle = 0.1; //~ 6 degree offset possible
   seg.setEpsAngle(angle);
   Eigen::Vector3f axis_cylinder;
   axis_cylinder << coefficients_plane->values[0], coefficients_plane->values[1], coefficients_plane->values[2];
@@ -290,13 +271,10 @@ void POLE_SEG::segmentation_(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd
   cylinder_can_be_pole_(cloud_cylinder_6);  
 
 
-  //tf
-  //color_only_cylinders_(cloud_cylinder_0,cloud_cylinder_1,cloud_cylinder_2,cloud_cylinder_3,cloud_cylinder_4,cloud_cylinder_5,cloud_cylinder_6);
-
-
   std::cerr << "Total number of cylinders found: " << cylinder_number_ << std::endl;
   std::cerr << "Total number of possibly correct cylinders: " << anzahl_cylinder_ << '\n' << std::endl;
   callback_called_once_ = 1;
+  return true;
 } 
 
 
@@ -322,11 +300,11 @@ int POLE_SEG::cylinder_found_(const pcl::PointCloud<PointT>::Ptr &cloud_cylinder
 
   //distance between all points -> maximum projected is absolute length of cylinder
   for (int i = 0; i < cloud_cylinder-> size (); ++i){
-    ebene = point[i].x*coefficients_cylinder->values[3] + point[i].y*coefficients_cylinder->values[4] + point[i].z*coefficients_cylinder->values[5];
+    ebene = point[i].x*plane_coeff_[0] + point[i].y*plane_coeff_[1] + point[i].z*plane_coeff_[2];
     if (abs(abs(ebene) - abs(plane_coeff_[3])) < ebene_closer) {
       ebene_closer = abs(ebene - plane_coeff_[3]);
       point_minmax_= point[i];
-      pointminmax_ = i;
+      pointlowest_ = i;
     }
     for (int j = i+1; j < cloud_cylinder-> size (); ++j){
       distance_vec << point[i].x - point[j].x, point[i].y - point[j].y, point[i].z - point[j].z;
@@ -334,6 +312,7 @@ int POLE_SEG::cylinder_found_(const pcl::PointCloud<PointT>::Ptr &cloud_cylinder
       if (distance > length_absolute) {
         length_absolute = distance;
         vector_points_distance = distance_vec;
+        pointhighest_ = j;
       }
     }
   } 
@@ -395,8 +374,9 @@ int POLE_SEG::cylinder_found_(const pcl::PointCloud<PointT>::Ptr &cloud_cylinder
 
     //writer_.write ("cloud_freestanding_kdtree.pcd", *cloud_freestanding, false);
 
-    if (kdtree.radiusSearch (searchPoint, radius_kdtree_, pointIdxRadiusSearch, pointRadiusSquaredDistance) > 1.25*cloud_cylinder-> size ())
+    if (kdtree.radiusSearch (searchPoint, radius_kdtree_, pointIdxRadiusSearch, pointRadiusSquaredDistance) > 1.2*cloud_cylinder-> size ())
     {
+      std::cerr << kdtree.radiusSearch (searchPoint, radius_kdtree_, pointIdxRadiusSearch, pointRadiusSquaredDistance) << cloud_cylinder-> size ();
       ++cylinder_number_;
       return 4;
     } 
@@ -487,10 +467,11 @@ void POLE_SEG::cylinder_can_be_pole_(const pcl::PointCloud<PointT>::Ptr &cloud_c
     std::cerr << "Cylinder Radius: " << radius_[current_cylinder_]*100 << " cm" << std::endl;
     std::cerr << "Cylinder Length: " << length_axis_real_ << " m" << std::endl;
     std::cerr << "Cylinder Point (Camera Frame): " << point_minmax_.x << ", " << point_minmax_.y << ", " << point_minmax_.z << std::endl;
-    tf_transformer(point_ontop_); //
+    tf_transformer(point_ontop_);
 
     //GREEN    
     cylinder_red_or_green_[current_cylinder_] = 1;
+    
     for (auto& point: *cloud_cylinder) { 
       point.r = '!';
       point.g = 'ü';
@@ -498,10 +479,15 @@ void POLE_SEG::cylinder_can_be_pole_(const pcl::PointCloud<PointT>::Ptr &cloud_c
     }
     auto& point = cloud_cylinder->points;
 
-    point[pointminmax_].r = 'ü';
-    point[pointminmax_].g = '!';
-    point[pointminmax_].b = '!';
+    point[pointlowest_].r = 'ü';
+    point[pointlowest_].g = '!';
+    point[pointlowest_].b = '!';
 
+    point[pointhighest_].r = '!';
+    point[pointhighest_].g = '!';
+    point[pointhighest_].b = 'ü';
+
+    std::cerr << "i/j of point lowest and highest:" << pointlowest_ << " " << pointhighest_;
     std::string cn_string = std::to_string(cylinder_number_);//current number of cylinder as string
     writer_.write ("cylinder_colored_" + cn_string + ".pcd", *cloud_cylinder, false);
 
@@ -518,7 +504,6 @@ void POLE_SEG::tf_transformer(const pcl::PointXYZRGB& point_on_pole){
     ros::NodeHandle node;
     ros::Rate rate(10.0);
     Eigen::Vector3d point;
-    Eigen::Vector3d point_final;
     point << point_on_pole.x, point_on_pole.y, point_on_pole.z;
     int ii = 0;
 
@@ -541,31 +526,65 @@ void POLE_SEG::tf_transformer(const pcl::PointXYZRGB& point_on_pole){
     //std::cerr << T_B_color_.matrix();
     Eigen::Matrix3d transform_matrix;
 
+    Eigen::Matrix3d R_B_imu;
+    R_B_imu << -0.4226182617, 0, 0.906307787, -1, 0, 0, 0, -0.906307787, -0.4226182617;
+    Eigen::Vector3d r_B_imu_imu = T_B_color_.translation();  // imu to body offset expressed in imu frame
+    
+    //Eigen::Matrix3d R_W_B = odometry.orientation_W_B.toRotationMatrix();
+    // add translational offset between imu and body frame
+    //odometry.position_W += R_W_B * R_B_imu * r_B_imu_imu;
+
     transform_matrix(0,0) = T_B_color_(0,0);
-    point_final = T_B_color_ * point;
-
-    std::cerr << T_B_color_.matrix();
-
-    std::cerr << "Cylinder Point (Body Frame): " << point_final[0] << ", " << point_final[1] << ", " << point_final[2] << '\n' << std::endl;
-
-  //}
+    coordinates_ = T_B_color_ * point;
+    std::cerr << "Cylinder Point (Body Frame): " << coordinates_ << '\n' << std::endl;
+    coordinates_ = R_B_imu * point + r_B_imu_imu;
+    std::cerr << "Cylinder Point (Body Frame): " << coordinates_ << '\n' << std::endl;
+    pub_ = nh_.advertise<geometry_msgs::Point>("point_of_pole", 100);
+    ros::Rate loop_rate(10);
+    geometry_msgs::Point msg;
+    msg.x = coordinates_[0];
+    msg.y = coordinates_[1];
+    msg.z = coordinates_[2];
+    pub_.publish(msg);
+    
+    int i = 0;
+    while (i < 10) {
+      pub_.publish(msg);
+      ++i;
+      loop_rate.sleep();
+    }
 } 
 
-int main(int argc, char** argv) {
-  ros::init(argc, argv,"test_node");
+/* Add two numbers and output the sum
+bool POLE_SEG::PoleDet(bachelor_thesis::PoleDet::Request  &req,
+         bachelor_thesis::PoleDet::Response &res) {
+ros::ok()
+  ++service_call_;
+  callback_called_once_ = 1;
+  std::cerr << "SERVICE: PointCloud has: " << cloud->size () << " data points." << std::endl;
+  segmentation_();
+
+  return true;
+} */
+
+// Main ROS method
+int main(int argc, char **argv) {
+    
+  // Initialize the node and set the name
+  ros::init(argc, argv, "adder_server");
+   
+  // Create the main access point for the node
+  // This piece of code enables the node to communicate with the ROS system.
   ros::NodeHandle nh;
-  
   POLE_SEG pole_seg;
-  ros::Rate r(10); // 10 hz
 
-  //ros::Subscriber sub = nh.subscribe("input", 10, &POLE_SEG::callback_, &pole_seg);
-
-  // Create a ROS publisher for the output point cloud (eg z Koordinate)
-  //pub = nh.advertise<sensor_msgs::PointCloud2> ("output", 1);
-
-  // Spin, don't exit program
+  // Create the service and advertise it to the ROS computational network
+  pole_seg.service_ = nh.advertiseService("/bachelor_thesis/adder", &POLE_SEG::PoleDet, &pole_seg);
+  ros::Subscriber sub = nh.subscribe("/D435/camera/depth_registered/points", 10, &POLE_SEG::callback_, &pole_seg);
+   
+  // Keep processing information over and over again
   ros::spin();
-
+ 
+  // Program completed successfully
   return 0;
-
 }

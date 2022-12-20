@@ -26,7 +26,7 @@ int main(int argc, char **argv) {
   ros::NodeHandle nh;
 
   // Create the service and advertise it to the ROS computational network
-  ros::Subscriber sub = nh.subscribe("/point_of_pole", 10, Callback);
+  ros::Subscriber sub = nh.subscribe("/point_of_pole", 1, Callback);
    
   // Keep processing information over and over again
   ros::spin();

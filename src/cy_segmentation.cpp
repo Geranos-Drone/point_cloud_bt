@@ -7,7 +7,196 @@ using namespace std::chrono;
 typedef pcl::PointXYZRGB PointT;
 typedef pcl::PointXYZ PointXYZ;
 
+
+void POLE_SEG::Callback (const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd) {                             
+  ROS_INFO_ONCE("Record_PC received first Pointcloud!");
+  recorded_pc_ = cloud_pcd;
+  tf_transformer_2();
+}
+
+
+bool POLE_SEG::Service(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response) {
+  ++service_called;
+  POLE_SEG pole_seg;
+
+  std::cerr << "service called: " << service_called << std::endl;
+  std::cerr << pole_seg.ii_ << std::endl;
+
+  //converts sensor_msgs to pointcloud
+  pcl_conversions::toPCL(*recorded_pc_,pcl_pc2);
+  pcl::fromPCLPointCloud2(pcl_pc2,*cloud_pretransformed);
+  std::cerr <<  "Recorded Datapoints: " << cloud_pretransformed->size() << std::endl;
+
+  //Filter the data first with Passthrough filter
+  pass.setInputCloud (cloud_pretransformed);
+  pass.setFilterFieldName ("z");
+  pass.setFilterLimits (0.01, 4); 
+  pass.filter (*cloud_filtered_pass);
+  std::cerr << "PointCloud after filtering has: " << cloud_filtered_pass->size () << " data points." << std::endl;
+
+  //Filter the data secondly with Voxelgrid filter to decrease size
+  vgfilter.setInputCloud (cloud_filtered_pass);
+  vgfilter.setLeafSize (0.025f, 0.025f, 0.025f);
+  //vgfilter.setLeafSize (0.01f, 0.01f, 0.01f);
+  vgfilter.filter (*cloud_filtered);
+  std::cerr << "PointCloud after Voxelgrid filtering has: " << cloud_filtered->size () << " data points." << std::endl;
+
+  //tf listener for coordinate transformation camera to drone
+  if (service_called == 1)
+    tf_transformer();
+  
+  //1. Write point cloud in drone body frame
+  pcl::PointCloud<PointT>::Ptr cloud_bodyframe {new pcl::PointCloud<PointT>}; //wrt odometry
+  cloud_bodyframe->resize(cloud_filtered->size ());
+  *cloud_bodyframe = *cloud_filtered;
+  Eigen::Vector3d point_pre;
+  Eigen::Vector3d point_after;
+
+  Eigen::Matrix3d rotation_t;
+  Eigen::Vector3d translation_t;
+  //rotation_t << 0, -0.4226182, 0.9063078, -1, 0, 0, 0, -0.9063078, -0.4226182;
+  rotation_t << 0, -0.2588190, 0.9659258, -1, 0, 0, 0, -0.9659258, -0.2588190;
+  translation_t << 0.18, 0, -0.15;
+  
+  for (int i = 0; i < cloud_bodyframe->size(); ++i) { 
+      point_pre << (*cloud_filtered)[i].x,(*cloud_filtered)[i].y,(*cloud_filtered)[i].z;
+      //point_after = T_B_color_ * point_pre;
+      point_after = rotation_t * point_pre + translation_t;
+      (*cloud_bodyframe)[i].x = point_after[0];
+      (*cloud_bodyframe)[i].y = point_after[1];
+      (*cloud_bodyframe)[i].z = point_after[2];
+  }
+  
+  //std::cerr << "T_B_color_: " << T_B_color_.rotation() << std::endl;
+  writer_.write ("cloud_camera_frame.pcd", *cloud_filtered, false);
+  writer_.write ("cloud_body_frame.pcd", *cloud_bodyframe, false);
+
+  //2. Write point cloud in world frame
+  pcl::PointCloud<PointT>::Ptr cloud_transformed {new pcl::PointCloud<PointT>}; //wrt odometry
+  cloud_transformed->resize(cloud_bodyframe->size ());
+  *cloud_transformed = *cloud_bodyframe;
+  Eigen::Vector3d point_pre_2;
+  Eigen::Vector3d point_after_2;
+
+  for (int i = 0; i < cloud_bodyframe->size(); ++i) { 
+      point_pre_2 << (*cloud_bodyframe)[i].x,(*cloud_bodyframe)[i].y,(*cloud_bodyframe)[i].z;
+      point_after_2 = T_B_world_ * point_pre_2;
+      (*cloud_transformed)[i].x = point_after_2[0];
+      (*cloud_transformed)[i].y = point_after_2[1];
+      (*cloud_transformed)[i].z = point_after_2[2];
+  }
+
+  pcl::PointCloud<PointT>::Ptr cloud__before {new pcl::PointCloud<PointT>}; //wrt odometry
+  if (service_called == 1) {
+    cloud_->resize(cloud_transformed->size());
+    *cloud_ = *cloud_transformed;
+  }
+  else
+    *cloud__before = *cloud_;
+    cloud_->resize(cloud__before->size() + cloud_transformed->size());
+    *cloud_ = *cloud__before + *cloud_transformed;
+
+  writer_.write ("cloud_before.pcd", *cloud__before, false);
+  writer_.write ("cloud_fused.pcd", *cloud_, false);
+  
+  if (service_called == 8) {
+    std_srvs::Empty srv;
+    pole_seg.test_function(cloud_);
+    if (!client_.call(srv)) { //rosservice call with pcl
+      ROS_ERROR_STREAM("Was not able to call service!");
+    }
+  }
+
+  return true;
+}
+
+
+void POLE_SEG::tf_transformer() {
+  tf::StampedTransform transform;
+
+  try {
+    tf_listener_.waitForTransform("boreas/base_link", "color", ros::Time(0), ros::Duration(5.0));  
+    tf_listener_.lookupTransform("boreas/base_link", "color", ros::Time(0), transform);      
+    ROS_INFO_STREAM("[Cylinder segmentation] Found base_link to color transform!");  
+  }
+  catch (tf::TransformException &ex) {
+    ROS_ERROR("%s",ex.what());
+  }
+  tf::transformTFToEigen(transform, T_B_color_);
+}
+
+void POLE_SEG::tf_transformer_2() {
+  tf::StampedTransform transform_2;
+
+  try {
+    tf_listener_.waitForTransform("world", "geranos/base_link", ros::Time(0), ros::Duration(5.0));  
+    tf_listener_.lookupTransform("world", "geranos/base_link", ros::Time(0), transform_2);      
+  }
+  catch (tf::TransformException &ex) {
+    ROS_ERROR("%s",ex.what());
+  }
+  tf::transformTFToEigen(transform_2, T_B_world_);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+///////////////////////////////////
+///////////////////////////////////
+///////////////////////////////////
+///////////////////////////////////
+///////////////////////////////////
+///////////////////////////////////
+
+
 //called everytime subscriber receeives messages and converted into a Pointcloud
+bool POLE_SEG::Service_2(bachelor_thesis::RecordPC::Request& request, bachelor_thesis::RecordPC::Response& response) {
+    std_srvs::Empty srv;
+    RECORD_PC record_pc;
+    ii_ = 0;
+
+    while (ii_ < 8) {
+      if (!client_.call(srv))
+        ROS_ERROR_STREAM("Was not able to call execute_trajectory service!");
+      ++ii_;
+    }
+    cloud_input_func();
+    response.pcl_cloud = request.A; //test
+    return true;
+}
+
+bool POLE_SEG::Service_3(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response) {
+    
+    std::cerr << "Service call worked";
+
+    return true;
+}
+
+
+void POLE_SEG::cloud_input_func(){
+  RECORD_PC record_pc;
+
+  pcl::PointCloud<PointT>::Ptr cloud_input_2 {new pcl::PointCloud<PointT>};
+  pcl::PointCloud<PointT>::Ptr cloud_input_3 {new pcl::PointCloud<PointT>};
+  cloud_input_2->resize(record_pc.cloud_->size ());
+  *cloud_input_2 = *record_pc.cloud_;
+  cloud_input_3 = record_pc.get_cloud();
+  std::cerr << "Point Cloud Size test function cloud_input_ cpp: " << cloud_input_->size() << std::endl;
+  std::cerr << "Point Cloud Size test function cloud_input_2: " << cloud_input_2->size() << std::endl;
+  std::cerr << "Point Cloud Size test function cloud_input_3: " << cloud_input_3->size() << std::endl;
+} 
+
 void POLE_SEG::callback_(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd){                                
   cloud_from_camera_ = cloud_pcd;
 }
@@ -304,18 +493,19 @@ int POLE_SEG::cylinder_found_(const pcl::PointCloud<PointT>::Ptr &cloud_cylinder
     if (abs(abs(ebene) - abs(plane_coeff_[3])) < ebene_closer) {
       ebene_closer = abs(ebene - plane_coeff_[3]);
       point_minmax_= point[i];
-      pointlowest_ = i;
+      pointlowest_ = point[i];
     }
-    for (int j = i+1; j < cloud_cylinder-> size (); ++j){
-      distance_vec << point[i].x - point[j].x, point[i].y - point[j].y, point[i].z - point[j].z;
-      float distance = sqrt(distance_vec.dot(distance_vec)); //absolute value of distance vector between the two points
-      if (distance > length_absolute) {
-        length_absolute = distance;
-        vector_points_distance = distance_vec;
-        pointhighest_ = j;
-      }
+  }
+  for (int j = 0; j < cloud_cylinder-> size (); ++j){
+    distance_vec << point_minmax_.x - point[j].x, point_minmax_.y - point[j].y, point_minmax_.z - point[j].z;
+    float distance = sqrt(distance_vec.dot(distance_vec)); //absolute value of distance vector between the two points
+    if (distance > length_absolute) {
+      length_absolute = distance;
+      vector_points_distance = distance_vec;
+      pointhighest_= point[j];
     }
-  } 
+  }
+   
 
   float cos_real = vector_points_distance.dot(real_axis_cylinder)/length_absolute;
   length_axis_real_ = abs(length_absolute * cos_real);
@@ -473,19 +663,23 @@ void POLE_SEG::cylinder_can_be_pole_(const pcl::PointCloud<PointT>::Ptr &cloud_c
     cylinder_red_or_green_[current_cylinder_] = 1;
     
     for (auto& point: *cloud_cylinder) { 
-      point.r = '!';
-      point.g = 'ü';
-      point.b = '!';
+      if (point.x == pointhighest_.x && point.y == pointhighest_.y && point.z == pointhighest_.z) {
+        pointhighest_.r = '!';
+        pointhighest_.g = '!';
+        pointhighest_.b = 'ü';
+      }
+      else if (point.x == pointlowest_.x && point.y == pointlowest_.y && point.z == pointlowest_.z)
+      {
+        pointlowest_.r = 'ü';
+        pointlowest_.g = '!';
+        pointlowest_.b = '!';
+      }
+     /* else {
+        point.r = '!';
+        point.g = 'ü';
+        point.b = '!';
+      }*/
     }
-    auto& point = cloud_cylinder->points;
-
-    point[pointlowest_].r = 'ü';
-    point[pointlowest_].g = '!';
-    point[pointlowest_].b = '!';
-
-    point[pointhighest_].r = '!';
-    point[pointhighest_].g = '!';
-    point[pointhighest_].b = 'ü';
 
     std::cerr << "i/j of point lowest and highest:" << pointlowest_ << " " << pointhighest_;
     std::string cn_string = std::to_string(cylinder_number_);//current number of cylinder as string
@@ -526,8 +720,8 @@ void POLE_SEG::tf_transformer(const pcl::PointXYZRGB& point_on_pole){
     //std::cerr << T_B_color_.matrix();
     Eigen::Matrix3d transform_matrix;
 
-    Eigen::Matrix3d R_B_imu;
-    R_B_imu << -0.4226182617, 0, 0.906307787, -1, 0, 0, 0, -0.906307787, -0.4226182617;
+    //Eigen::Matrix3d R_B_imu;
+    //R_B_imu << 0, -0.4226182617, 0.906307787, -1, 0, 0, 0, -0.906307787, -0.4226182617;
     Eigen::Vector3d r_B_imu_imu = T_B_color_.translation();  // imu to body offset expressed in imu frame
     
     //Eigen::Matrix3d R_W_B = odometry.orientation_W_B.toRotationMatrix();
@@ -537,8 +731,8 @@ void POLE_SEG::tf_transformer(const pcl::PointXYZRGB& point_on_pole){
     transform_matrix(0,0) = T_B_color_(0,0);
     coordinates_ = T_B_color_ * point;
     std::cerr << "Cylinder Point (Body Frame): " << coordinates_ << '\n' << std::endl;
-    coordinates_ = R_B_imu * point + r_B_imu_imu;
-    std::cerr << "Cylinder Point (Body Frame): " << coordinates_ << '\n' << std::endl;
+    //coordinates_ = R_B_imu * point + r_B_imu_imu;
+    //std::cerr << "Cylinder Point (Body Frame): " << coordinates_ << '\n' << std::endl;
     pub_ = nh_.advertise<geometry_msgs::Point>("point_of_pole", 100);
     ros::Rate loop_rate(10);
     geometry_msgs::Point msg;
@@ -577,11 +771,20 @@ int main(int argc, char **argv) {
   // This piece of code enables the node to communicate with the ROS system.
   ros::NodeHandle nh;
   POLE_SEG pole_seg;
+  ros::ServiceServer service_;
 
   // Create the service and advertise it to the ROS computational network
   pole_seg.service_ = nh.advertiseService("/bachelor_thesis/adder", &POLE_SEG::PoleDet, &pole_seg);
   ros::Subscriber sub = nh.subscribe("/D435/camera/depth_registered/points", 10, &POLE_SEG::callback_, &pole_seg);
-   
+  ros::ServiceServer service_2 = nh.advertiseService("/bachelor_thesis/service_for_recfus", &POLE_SEG::Service_2, &pole_seg);
+  pole_seg.client_ = nh.serviceClient<std_srvs::Empty>("record_and_fusing_pointcloud");
+  ros::ServiceServer service_3 = nh.advertiseService("/bachelor_thesis/segmentation_fused_cloud", &POLE_SEG::Service_3, &pole_seg);
+
+
+  ros::Subscriber sub = nh.subscribe("/input_pointcloud", 1, &POLE_SEG::Callback, &record_pc);
+  ros::ServiceServer service = nh.advertiseService("/bachelor_thesis/record_pointcloud", &POLE_SEG::Service, &record_pc);
+  record_pc.client_ = nh.serviceClient<std_srvs::Empty>("/bachelor_thesis/segmentation_fused_cloud");
+
   // Keep processing information over and over again
   ros::spin();
  

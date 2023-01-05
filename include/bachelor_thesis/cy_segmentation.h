@@ -27,6 +27,8 @@
 #include <cstdlib>
 #include <ros/service_traits.h>
 #include "bachelor_thesis/PoleDet.h"
+#include "bachelor_thesis/RecordPC.h"
+//#include "bachelor_thesis/record_pointcloud.h"
 
 /*
 #include <sensor_msgs/NavSatFix.h>
@@ -47,17 +49,58 @@
 
 typedef pcl::PointXYZRGB PointT;
 
+class RECORD_PC
+{
 
-class POLE_SEG
+public:
+
+  //functions
+  void Callback(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd);
+  bool Service(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response);
+  void tf_transformer();
+  void tf_transformer_2();
+  void test();
+
+  //Services and ros subscribers
+  int service_called = 0;
+  sensor_msgs::PointCloud2::ConstPtr recorded_pc_;      
+  ros::ServiceClient client_;
+
+  //point clouds
+  pcl::PCDWriter writer_;
+  pcl::VoxelGrid<PointT> vgfilter;
+  pcl::PassThrough<PointT> pass;
+  pcl::PointCloud<PointT>::Ptr cloud_ {new pcl::PointCloud<PointT>};
+  pcl::PointCloud<PointT>::Ptr cloud_pretransformed {new pcl::PointCloud<PointT>};
+  pcl::PCLPointCloud2 pcl_pc2;
+  pcl::PointCloud<PointT>::Ptr cloud_filtered {new pcl::PointCloud<PointT>};
+  pcl::PointCloud<PointT>::Ptr cloud_filtered_pass {new pcl::PointCloud<PointT>};
+
+  //odometry
+  //mav_msgs::EigenOdometry current_odometry_;
+
+  //tf
+  ros::NodeHandle nh_;
+  tf::TransformListener tf_listener_;
+  Eigen::Affine3d T_B_color_;
+  Eigen::Affine3d T_B_world_;
+  //Eigen::Affine3d T_B_body_world_;
+
+  pcl::PointCloud<PointT>::Ptr get_cloud() {
+    std::cerr << "Size cloud_ in RECORD_PC: " << cloud_->size() << std::endl;
+    return cloud_;
+  }
+};
+
+class POLE_SEG //: public RECORD_PC
 {
   using PointTPtr = typename pcl::PointCloud<PointT>::Ptr;
 
 public:
   /*  POLE_SEG(const ros::NodeHandle& nh, const ros::NodeHandle& private_nh);
     ~POLE_SEG();
-
-
-private: */
+ */
+    int ii_;
     pcl::PCDWriter writer_;
     int cylinder_number_ = 0; //current number of cylinder 
     Eigen::Vector4f plane_coeff_;
@@ -73,6 +116,7 @@ private: */
     pcl::VoxelGrid<PointT> vgfilter;
     pcl::PassThrough<PointT> pass;
     pcl::PointCloud<PointT>::Ptr cloud_filtered_voxel {new pcl::PointCloud<PointT>};
+    pcl::PointCloud<PointT>::Ptr cloud_input_ {new pcl::PointCloud<PointT>};
     pcl::search::KdTree<PointT>::Ptr tree {new pcl::search::KdTree<PointT> ()}; 
     pcl::NormalEstimation<PointT, pcl::Normal> ne;
     pcl::PointCloud<pcl::Normal>::Ptr cloud_normals {new pcl::PointCloud<pcl::Normal>};
@@ -107,14 +151,15 @@ private: */
     pcl::PointXYZRGB point_minmax_3_; //extreme point of 3rd cylinder which is closer to plane
     pcl::PointXYZRGB point_minmax_4_; //extreme point of 4th cylinder which is closer to plane
     pcl::PointXYZRGB point_minmax_5_; //extreme point of 5th cylinder which is closer to planed
+    
+    pcl::PointXYZRGB pointhighest_; //extreme point to point_minmax_
+    pcl::PointXYZRGB pointlowest_; //equals point_min_max_
 
     int current_cylinder_ = 0; //current number of cylinder 
     pcl::PointXYZRGB point_ontop_; //extreme point of current cylinder which is closer to plane
     float radius_kdtree_; //radius used for kdtree (freestanding pole criteria)
     float length_axis_real_; //projected length
     int cylinder_found_pole_ = 0; //depending on value cylinder found could be the pole or not
-    int pointlowest_;
-    int pointhighest_;
 
     Eigen::VectorXf radius_ = Eigen::VectorXf::Zero(7); //radius of cylinders
     Eigen::VectorXf cylinder_red_or_green_ = Eigen::VectorXf::Zero(7); //0 if red and 1 if green
@@ -127,8 +172,10 @@ private: */
 
     //Service
     ros::ServiceServer service_;
+    ros::ServiceClient client_;
 
     //functions
+    void cloud_input_func();
     void callback_(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd);
     //void segmentation_(); //const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd);
     void tf_transformer(const pcl::PointXYZRGB& point_on_pole);
@@ -138,6 +185,17 @@ private: */
     bool PoleDet(bachelor_thesis::PoleDet::Request  &req, bachelor_thesis::PoleDet::Response &res);
     bool StopService_(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response);
     void publisher_function_();
+    bool Service_2(bachelor_thesis::RecordPC::Request& request, bachelor_thesis::RecordPC::Response& response);
+    bool Service_3(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response);
+
+    void test_function(pcl::PointCloud<PointT>::Ptr &cloud) {
+        std::cerr << "Point Cloud Size test function cloud_: " << cloud->size() << std::endl;
+        cloud_input_->resize(cloud->size ());
+        *cloud_input_ = *cloud;
+        std::cerr << "Point Cloud Size test function cloud_input_ h: " << cloud_input_->size() << std::endl;
+        //cloud_input_func(cloud_input_);
+    }
+
 };
 
 #endif

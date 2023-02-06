@@ -1,0 +1,198 @@
+<?xml version="1.0"?>
+
+<launch>
+  <!-- ************************ -->
+  <!-- ****** Parameters ****** -->
+  <!-- ************************ -->
+  <!-- vehicle config -->
+  <arg name="mav_name"              default="boreas"/> 
+  <arg name="ns_name"               default="geranos"/> 
+  <arg name="vehicle_config"        default="sim"/>
+  <arg name="object_name"           default="geranos_boreas"/>
+  <arg name="pole_name"             default="geranos_pole_pa"/> <!-- geranos_pole_pa,geranos_pole_wh or geranos_pole_al -->
+
+  <!-- realsense  -->
+  <arg name="serial_no_camera1"         default="215122253417"/>      <!-- Note: Replace with actual serial number -->
+  <arg name="serial_no_camera2"         default="151422254198"/>      <!-- Note: Replace with actual serial number -->
+  <arg name="camera1"                   default="camera/bottom"/>   <!-- Note: Replace with camera name -->
+  <arg name="camera2"                   default="camera/top"/>   <!-- Note: Replace with camera name -->
+
+
+  <arg name="enable_logging"        default="false"/>
+  <arg name="log_file"              default="$(arg mav_name)"/>
+  <arg name="enable_ground_truth"   default="true"/> <!-- false -->
+  <arg name="add_manipulator"       default="false"/>
+  <arg name="add_tether"            default="false"/>
+  
+  <!-- camera -->  <!-- camera position and angle, also change in boreas_base.xacro -->
+  <arg name="add_rgbd_sensor"       default="true"/> 
+  <arg name="use_rviz"              default="true"/>
+  <arg name="pi" default="3.14159"/>
+  <arg name="cam_x" default="0.18"/>
+  <arg name="cam_y" default="0.0"/>
+  <arg name="cam_z_top" default="-0.15"/>
+  <arg name="cam_z_bottom" default="-0.2565"/>
+  
+
+    <!-- controller config -->
+  <!-- control module options:
+  estimator:            estimates external disturbances on the platform
+  wrench_sensor_filter: filters force/torques sensor measurements
+  impedance:            impedance control module
+  allocation:           allocates wrench to actuator commands -->
+  <arg name="control_modules"       value="[impedance, allocation_geranos]"/>
+  <arg name="px4_sitl"              default="false"/>
+
+
+  <arg name="waypoint_file_name"    default="eval_traj_small.yaml"/>
+
+  <arg name="odometry_topic_direct" default="odometry_sensor1"/>
+  <arg name="odometry_topic_msf"    default="msf_core"/> <!-- Options: odometry_sensor1, ground_truth, msf_core -->
+  <arg name="wrench_sensor_topic"   default="wrench_vector"/> 
+  <arg name="world_frame_name"      default="world"/>
+
+  <arg name="dir_param_files"       value="$(find mav_startup)/parameters/mavs"/>
+  
+  <arg name="ctrl-sliders"          default="true"/>
+
+
+  <!-- *************** -->
+  <!-- ***** MSF ***** -->
+  <!-- *************** -->
+  <group ns="$(arg ns_name)">
+    <node name="pose_sensor" pkg="msf_updates" type="pose_sensor" clear_params="true" output="screen">
+      <remap from="msf_updates/transform_input" to="$(arg odometry_topic_direct)/transform" />
+      <remap from="msf_core/imu_state_input" to="imu" />
+      <rosparam file="$(arg dir_param_files)/$(arg ns_name)/msf_parameters_$(arg vehicle_config).yaml"/>
+      <param name="capability_group" value="StateEstimation" />
+    </node>
+  </group>
+
+  <!-- **************************** -->
+  <!-- ***** STATE ESTIMATION ***** -->
+  <!-- **************************** -->
+  <group ns="$(arg mav_name)">
+
+    <!-- VECTORNAV VN-100 IMU -->
+    <include file="$(find vectornav)/launch/vectornav.launch">
+        <param name="capability_group" value="Sensor" />
+    </include>
+  </group>
+
+  <group ns="$(arg ns_name)">
+
+    <!-- VICON BOREAS-->
+    <include file="$(find ros_vrpn_client)/launch/asl_vicon.launch">
+      <arg name="object_name" value="$(arg object_name)"/>
+      <param name="capability_group" value="Vicon" />
+      <param name="object_name" value= "$(arg object_name)" /> <!-- insert object name -->
+      <arg name="vrpn_server_ip" value="10.10.10.5" /> <!-- insert vrpn_server_ip -->
+      <param name="capability_group" value="Sensor" />
+    <!-- VICON POLE-->
+  <include file="$(find ros_vrpn_client)/launch/asl_vicon.launch">
+    <arg name="object_name" value="$(arg pole_name)"/>
+    <param name="capability_group" value="Vicon" />
+    <param name="object_name" value= "$(arg pole_name)" /> <!-- insert object name -->
+    <arg name="vrpn_server_ip" value="10.10.10.5" /> <!-- insert vrpn_server_ip -->
+    <param name="capability_group" value="Sensor" />  
+  </include>
+    </include>
+  </group>
+
+
+
+
+ <!-- ******************* -->
+  <!-- ***** Sensing ***** -->
+  <!-- *******************
+  <group ns="$(arg mav_name)">
+    <group if="$(arg add_rgbd_sensor)" ns="camera">
+      <group ns="bottom">
+        <include file="$(find realsense_gazebo_plugin)/launch/D435_depth_proc.launch" />
+        <node pkg="tf" type="static_transform_publisher" name="realsense_link_broadcaster" 
+            args="$(arg cam_x) $(arg cam_y) $(arg cam_z_bottom) -0.4304593 0.4304593 -0.5609855 0.5609855 $(arg mav_name)/base_link bottom/color 10" />
+      </group>
+      <group ns="top">
+        <include file="$(find realsense_gazebo_plugin)/launch/D435_depth_proc.launch"/>
+        <node pkg="tf" type="static_transform_publisher" name="realsense_link_broadcaster" 
+            args="$(arg cam_x) $(arg cam_y) $(arg cam_z_top) -0.5416752 0.5416752 -0.4545195 0.4545195  $(arg mav_name)/base_link top/color 10" /> 
+      </group>
+      <node pkg="topic_tools" type="relay" name="relay_pointcloud_bottom" args="bottom/depth_registered/points pointclouds" />
+      <node pkg="topic_tools" type="relay" name="relay_pointcloud_top" args="top/depth_registered/points pointclouds" />
+    </group>
+  </group> -->
+
+
+    <!-- ************************** -->
+  <!-- ***** REALSENSE D455 ***** -->
+  <!-- ************************** -->
+
+  <group ns="$(arg mav_name)">
+    <remap from="pointclouds" to="pointclouds" />
+    <include file="$(find realsense2_camera)/launch/rs_multiple_devices.launch">
+      <arg name="serial_no_camera1" value="$(arg serial_no_camera1)"/>
+      <arg name="serial_no_camera2" value="$(arg serial_no_camera2)"/>
+      <arg name="camera1"           default="$(arg camera1)"/>
+      <arg name="camera2"           default="$(arg camera2)"/>
+      <arg name="enable_pointcloud" value="true"/>
+      <arg name="clip_distance_min" value="0.6"/> 
+      <arg name="clip_distance_max" value="7"/> 
+    </include>
+    <param name="capability_group" value="Sensor" />
+  </group> 
+  <group ns="$(arg mav_name)">
+    <!-- ***** RGBD Camera ***** -->
+    <group if="$(arg add_rgbd_sensor)" ns="camera">
+      
+      <group ns="bottom">
+        <node pkg="tf" type="static_transform_publisher" name="realsense_link_broadcaster" 
+            args="$(arg cam_x) -0.1 $(arg cam_z_bottom) 0.4055798 0.4055798 0.579228 0.579228 $(arg mav_name)/base_link bottom/color 10" /> <!-- bottom/color --> <!-- 0 75 -90-->
+      </group>
+
+      <group ns="top">
+        <node pkg="tf" type="static_transform_publisher" name="realsense_link_broadcaster" 
+            args="$(arg cam_x) $(arg cam_y) $(arg cam_z_top) -0.5963678 0.5963678 -0.3799282 0.3799282  $(arg mav_name)/base_link top/color 10" /> <!-- -180 80 90-->
+      </group>
+
+      <node pkg="topic_tools" type="relay" name="relay_pointcloud_bottom" args="bottom/depth_registered/points pointclouds" />
+      <node pkg="topic_tools" type="relay" name="relay_pointcloud_top" args="top/depth_registered/points pointclouds" />
+
+    </group>
+  </group> 
+
+  <!-- pcd pole segmentation
+  <node name="cy_segmentation_realdata" pkg="bachelor_thesis" type="cy_segmentation_realdata" output="screen"/>
+
+  ***** Record Pointclouds ***** 
+  <node name="record_pointcloud_trajectory" pkg="trajectory_pointcloud_bt" type="record_pointcloud_trajectory" output="screen">
+    <remap from="/odometry" to="/geranos/transformed_odometry"/> 
+  </node>-->
+
+  <!-- Open rviz 
+  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find bachelor_thesis)/rviz/camera.rviz" required="true">
+      <remap from="/camera/depth/color/points" to="D435/camera/depth_registered/points"/>
+      <remap from="/camera/depth/image_rect_raw" to="D435/camera/color/image_raw"/>
+      <remap from="/camera/depth/camera_info" to="D435/camera/color/camera_info"/>
+  </node> -->
+
+  <!-- *************** -->
+  <!-- ***** TFs ***** -->
+  <!-- *************** -->
+  <node pkg="tf2_ros" type="static_transform_publisher" name="tf_base_imu" args="0 0 0 0 0 0 1.0 base imu" />
+  <node pkg="tf2_ros" type="static_transform_publisher" name="tf_ns_mav_bases" args="0 0 0 0 0 0 1.0 $(arg ns_name)/base_link $(arg mav_name)/base_link" />
+
+  <node pkg="tf2_ros" type="static_transform_publisher" name="tf_real_camera_bottom1" args="0.13897013 0.16829463 -0.24924875 0.4117078176227676 0.39990700247340316 0.5806078746538689 0.5774647694881481 imu camera/bottom_link_optical_frame_direct" >
+    <param name="capability_group" value="TF" />
+  </node>
+  <node pkg="tf2_ros" type="static_transform_publisher" name="tf_real_camera_bottom2" args="0 0 0 0.5 -0.5 0.5 0.5 camera/bottom_link_optical_frame_direct camera/bottom_link" >
+    <param name="capability_group" value="TF" />
+  </node>
+    
+  <node pkg="tf2_ros" type="static_transform_publisher" name="tf_world_vicon" args="0 0 0 0 0 0 1 world vicon">
+      <param name="capability_group" value="TF" />
+  </node>
+  <node pkg="tf2_ros" type="static_transform_publisher" name="tf_base_$(arg object_name)" args="0 0 0 0 0 0 1 $(arg object_name) base">
+      <param name="capability_group" value="TF" />
+  </node> 
+
+</launch>

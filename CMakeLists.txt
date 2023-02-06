@@ -12,7 +12,7 @@ set(PCL_DIR "/home/henriette/catkinws/src/pcl-trunk/build")
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
-  catkin_simple
+  catkin_simple REQUIRED
   roscpp
   rospy
   std_msgs
@@ -24,7 +24,10 @@ find_package(catkin REQUIRED COMPONENTS
   ##pcl_conversions REQUIRED
   eigen_conversions
   tf_conversions 
+  yaml_cpp_catkin REQUIRED
+  ##trajectory_pointcloud_bt
 )
+
 find_package(Eigen3 REQUIRED)
 
 
@@ -71,8 +74,7 @@ find_package(Eigen3 REQUIRED)
 ## Generate services in the 'srv' folder
 add_service_files(
   FILES
-  PoleDet.srv
-#   Service2.srv
+  PoleFound.srv
 )
 
 ## Generate actions in the 'action' folder
@@ -124,23 +126,6 @@ catkin_package(
 #  DEPENDS system_lib
 )
 
-
-add_executable(cy_segmentation src/cy_segmentation.cpp)
-target_link_libraries(cy_segmentation ${catkin_LIBRARIES})
-add_dependencies(cy_segmentation bachelor_thesis_gencpp)
-
-add_executable(pole_seg src/pole_seg.cpp)
-target_link_libraries(pole_seg ${catkin_LIBRARIES})
-
-add_executable(coordinates_pub src/coordinates_pub.cpp)
-target_link_libraries(coordinates_pub ${catkin_LIBRARIES})
-
-add_executable(simple_service_server src/simple_service_server.cpp)
-target_link_libraries(simple_service_server ${catkin_LIBRARIES})
- 
-add_executable(simple_service_client src/simple_service_client.cpp)
-target_link_libraries(simple_service_client ${catkin_LIBRARIES})
-
 ###########
 ## Build ##
 ###########
@@ -167,6 +152,15 @@ include_directories(include ${catkin_INCLUDE_DIRS})
 ## The recommended prefix ensures that target names across packages don't collide
 # add_executable(${PROJECT_NAME}_node src/bachelor_thesis_node.cpp)
 
+add_executable(cy_segmentation src/cy_segmentation.cpp)
+target_link_libraries(cy_segmentation ${catkin_LIBRARIES})
+add_dependencies(cy_segmentation bachelor_thesis_gencpp)
+
+
+add_executable(cy_segmentation_realdata src/cy_segmentation_realdata.cpp)
+target_link_libraries(cy_segmentation_realdata ${catkin_LIBRARIES})
+add_dependencies(cy_segmentation bachelor_thesis_gencpp)
+
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
 ## target back to the shorter version for ease of user use
@@ -176,6 +170,7 @@ include_directories(include ${catkin_INCLUDE_DIRS})
 ## Add cmake target dependencies of the executable
 ## same as for the library above
 # add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(cy_segmentation ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
 # target_link_libraries(${PROJECT_NAME}_node

@@ -26,108 +26,97 @@
 #include <std_srvs/Empty.h>
 #include <cstdlib>
 #include <ros/service_traits.h>
-#include "bachelor_thesis/PoleDet.h"
-#include "bachelor_thesis/RecordPC.h"
-//#include "bachelor_thesis/record_pointcloud.h"
-
-/*
-#include <sensor_msgs/NavSatFix.h>
-#include <pcl/io/pcd_io.h>
-#include <pcl/features/principal_curvatures.h>
-#include <pcl/sample_consensus/method_types.h>
-#include <pcl/sample_consensus/model_types.h>
-#include <pcl/common/transforms.h>
-
-#include <eigen_conversions/eigen_msg.h>
-#include <Eigen/Dense>
-#include "std_msgs/String.h"
-#include <std_msgs/Float32.h>
-#include <string>
-#include "gtest/gtest.h"
-#include "Eigen/Core"
-#include "Eigen/Geometry" */
+#include "bachelor_thesis/PoleFound.h"
 
 typedef pcl::PointXYZRGB PointT;
-
-class RECORD_PC
-{
-
-public:
-
-  //functions
-  void Callback(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd);
-  bool Service(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response);
-  void tf_transformer();
-  void tf_transformer_2();
-  void test();
-
-  //Services and ros subscribers
-  int service_called = 0;
-  sensor_msgs::PointCloud2::ConstPtr recorded_pc_;      
-  ros::ServiceClient client_;
-
-  //point clouds
-  pcl::PCDWriter writer_;
-  pcl::VoxelGrid<PointT> vgfilter;
-  pcl::PassThrough<PointT> pass;
-  pcl::PointCloud<PointT>::Ptr cloud_ {new pcl::PointCloud<PointT>};
-  pcl::PointCloud<PointT>::Ptr cloud_pretransformed {new pcl::PointCloud<PointT>};
-  pcl::PCLPointCloud2 pcl_pc2;
-  pcl::PointCloud<PointT>::Ptr cloud_filtered {new pcl::PointCloud<PointT>};
-  pcl::PointCloud<PointT>::Ptr cloud_filtered_pass {new pcl::PointCloud<PointT>};
-
-  //odometry
-  //mav_msgs::EigenOdometry current_odometry_;
-
-  //tf
-  ros::NodeHandle nh_;
-  tf::TransformListener tf_listener_;
-  Eigen::Affine3d T_B_color_;
-  Eigen::Affine3d T_B_world_;
-  //Eigen::Affine3d T_B_body_world_;
-
-  pcl::PointCloud<PointT>::Ptr get_cloud() {
-    std::cerr << "Size cloud_ in RECORD_PC: " << cloud_->size() << std::endl;
-    return cloud_;
-  }
-};
+typedef pcl::PointXYZ PointXYZ;
 
 class POLE_SEG //: public RECORD_PC
 {
   using PointTPtr = typename pcl::PointCloud<PointT>::Ptr;
 
 public:
-  /*  POLE_SEG(const ros::NodeHandle& nh, const ros::NodeHandle& private_nh);
-    ~POLE_SEG();
- */
-    int ii_;
-    pcl::PCDWriter writer_;
-    int cylinder_number_ = 0; //current number of cylinder 
-    Eigen::Vector4f plane_coeff_;
-    int anzahl_cylinder_; //number of possibly correct cylinders found
-    bool callback_called_once_ = 0;
-    int service_call_ = 0;
-    Eigen::Vector3d coordinates_;
+    //Functions
+    void Callback(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd);
+    void Callback_top(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd);
+    void cloud_input_func();
+    int cylinder_found_(const pcl::PointCloud<PointT>::Ptr &cloud_cylinder, pcl::ModelCoefficients::Ptr &coefficients_cylinder);
+    void cylinder_can_be_pole_(const pcl::PointCloud<PointT>::Ptr &cloud_cylinder);
 
-    pcl::PCLPointCloud2 pcl_pc2;
-    pcl::PointCloud<PointT>::Ptr cloud {new pcl::PointCloud<PointT>};
-    pcl::PointCloud<PointT>::Ptr cloud_filtered {new pcl::PointCloud<PointT>};
-    //Filter
-    pcl::VoxelGrid<PointT> vgfilter;
-    pcl::PassThrough<PointT> pass;
+    void new_view_point_trajectory();
+    bool Service(bachelor_thesis::PoleFound::Request& request, bachelor_thesis::PoleFound::Response& response);
+    bool Service_real(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response);
+    void tf_transformer_bottom();
+    void tf_transformer_pole();
+    void tf_transformer_top();
+    void tf_transformer_world_b();
+    void tf_transformer_world_t();
+
+    //Parameters
+    bool bottom_not_in_view = 0;
+    bool pole_in_edge_low = 0;    
+    bool pole_in_edge_up = 0;
+    bool top_not_in_view = 0;
+    double drone_height_bottom;
+    double drone_height_top;
+    double duration_total = 0; //runtime of total algorithm
+    double mean_plane_z = 0;
+    double min_height_;
+    double plane_max_z_ = 0; //max z-coordinate of plane
+    double pole_on_floor_ = 0;
+    Eigen::Vector3d position_vector_bottom;
+    Eigen::Vector3d position_vector_top;
+    Eigen::Vector4f plane_coeff_; //plane model parameters: a, b, c, d
+    Eigen::Vector4d service_response; 
+    Eigen::VectorXd pole_found_; //1 if pole found
+    Eigen::VectorXf radius_ = Eigen::VectorXf::Zero(7); //radius of cylinders
+    float length_cylinder_; //length of cylinder 
+    int anzahl_cylinder_; //number of possibly correct cylinders found
+    int current_cylinder_ = 0; //current number of cylinder 
+    int cylinder_found_pole_ = 0; //depending on value cylinder found could be the pole or not
+
+    //PCL point clouds PointT
+    pcl::PointCloud<PointT>::Ptr all_cylinders_nothing_else_cloud {new pcl::PointCloud<PointT>};
+    pcl::PointCloud<PointT>::Ptr cloud_ {new pcl::PointCloud<PointT>};
+    pcl::PointCloud<PointT>::Ptr cloud_bodyframe_ {new pcl::PointCloud<PointT>};
+    pcl::PointCloud<PointT>::Ptr cloud_bodyframe_b {new pcl::PointCloud<PointT>};
+    pcl::PointCloud<PointT>::Ptr cloud_bodyframe_t {new pcl::PointCloud<PointT>};
+    pcl::PointCloud<PointT>::Ptr cloud_filtered2 {new pcl::PointCloud<PointT>};
+    pcl::PointCloud<PointT>::Ptr cloud_filtered_bot {new pcl::PointCloud<PointT>};
+    pcl::PointCloud<PointT>::Ptr cloud_filtered_pass {new pcl::PointCloud<PointT>};
+    pcl::PointCloud<PointT>::Ptr cloud_filtered_pass_top {new pcl::PointCloud<PointT>};    
+    pcl::PointCloud<PointT>::Ptr cloud_filtered_top {new pcl::PointCloud<PointT>};
     pcl::PointCloud<PointT>::Ptr cloud_filtered_voxel {new pcl::PointCloud<PointT>};
+    pcl::PointCloud<PointT>::Ptr cloud_input {new pcl::PointCloud<PointT>};
     pcl::PointCloud<PointT>::Ptr cloud_input_ {new pcl::PointCloud<PointT>};
-    pcl::search::KdTree<PointT>::Ptr tree {new pcl::search::KdTree<PointT> ()}; 
+    pcl::PointCloud<PointT>::Ptr cloud_plane {new pcl::PointCloud<PointT>};
+    pcl::PointCloud<PointT>::Ptr cloud_pretransformed {new pcl::PointCloud<PointT>};
+    pcl::PointCloud<PointT>::Ptr cloud_pretransformed_top {new pcl::PointCloud<PointT>};
+
+    //PCL point clouds PointXYZ
+    pcl::PointCloud<PointXYZ>::Ptr cloud_pretransformed_xyz {new pcl::PointCloud<PointXYZ>};
+    pcl::PointCloud<PointXYZ>::Ptr cloud_pretransformed_xyz_t {new pcl::PointCloud<PointXYZ>};
+
+    //sensor msg and converting to point cloud
+    pcl::PCLPointCloud2 pcl_pc2;
+    sensor_msgs::PointCloud2::ConstPtr recorded_pc_;      
+    sensor_msgs::PointCloud2::ConstPtr recorded_pc_top_;      
+
+    //PCL cloud normals
     pcl::NormalEstimation<PointT, pcl::Normal> ne;
     pcl::PointCloud<pcl::Normal>::Ptr cloud_normals {new pcl::PointCloud<pcl::Normal>};
-    pcl::SACSegmentationFromNormals<PointT, pcl::Normal> seg; 
-    pcl::ExtractIndices<PointT> extract;
-    pcl::PointCloud<PointT>::Ptr cloud_plane {new pcl::PointCloud<PointT>};
-    pcl::PointCloud<PointT>::Ptr cloud_filtered2 {new pcl::PointCloud<PointT>};
-    pcl::ExtractIndices<pcl::Normal> extract_normals;
     pcl::PointCloud<pcl::Normal>::Ptr cloud_normals2 {new pcl::PointCloud<pcl::Normal>};
 
-    //pcl::PointIndices::Ptr inliers_plane {new pcl::PointIndices};
+    //PCL filtering and extracting
+    pcl::ExtractIndices<pcl::Normal> extract_normals;
+    pcl::ExtractIndices<PointT> extract;
+    pcl::PassThrough<PointT> pass;
+    pcl::SACSegmentationFromNormals<PointT, pcl::Normal> seg; 
+    pcl::search::KdTree<PointT>::Ptr tree {new pcl::search::KdTree<PointT> ()}; 
+    pcl::VoxelGrid<PointT> vgfilter;
+
+    //Coefficients and inliers
+    pcl::ModelCoefficients::Ptr coefficients_plane {new pcl::ModelCoefficients};
     pcl::PointIndices::Ptr inliers_cylinder_0 {new pcl::PointIndices};
     pcl::PointIndices::Ptr inliers_cylinder_1 {new pcl::PointIndices};
     pcl::PointIndices::Ptr inliers_cylinder_2 {new pcl::PointIndices};
@@ -135,67 +124,26 @@ public:
     pcl::PointIndices::Ptr inliers_cylinder_4 {new pcl::PointIndices};
     pcl::PointIndices::Ptr inliers_cylinder_5 {new pcl::PointIndices};
     pcl::PointIndices::Ptr inliers_cylinder_6 {new pcl::PointIndices}; 
-
-    sensor_msgs::PointCloud2::ConstPtr cloud_from_camera_;                                
-
-
     pcl::PointIndices::Ptr inliers_plane {new pcl::PointIndices};
-    pcl::ModelCoefficients::Ptr coefficients_plane {new pcl::ModelCoefficients};
 
+    //write pdc files for visualising point cloud in rviz
+    pcl::PCDWriter writer_;
 
-    //needed to see if previous found cylinders similar 
-    pcl::PointXYZRGB point_minmax_; //extreme point of current cylinder which is closer to plane
-    pcl::PointXYZRGB point_minmax_0_; //extreme point of 0th cylinder which is closer to plane
-    pcl::PointXYZRGB point_minmax_1_; //extreme point of 1st cylinder which is closer to plane
-    pcl::PointXYZRGB point_minmax_2_; //extreme point of 2nd cylinder which is closer to plane
-    pcl::PointXYZRGB point_minmax_3_; //extreme point of 3rd cylinder which is closer to plane
-    pcl::PointXYZRGB point_minmax_4_; //extreme point of 4th cylinder which is closer to plane
-    pcl::PointXYZRGB point_minmax_5_; //extreme point of 5th cylinder which is closer to planed
-    
-    pcl::PointXYZRGB pointhighest_; //extreme point to point_minmax_
-    pcl::PointXYZRGB pointlowest_; //equals point_min_max_
-
-    int current_cylinder_ = 0; //current number of cylinder 
-    pcl::PointXYZRGB point_ontop_; //extreme point of current cylinder which is closer to plane
-    float radius_kdtree_; //radius used for kdtree (freestanding pole criteria)
-    float length_axis_real_; //projected length
-    int cylinder_found_pole_ = 0; //depending on value cylinder found could be the pole or not
-
-    Eigen::VectorXf radius_ = Eigen::VectorXf::Zero(7); //radius of cylinders
-    Eigen::VectorXf cylinder_red_or_green_ = Eigen::VectorXf::Zero(7); //0 if red and 1 if green
+    //PCL single data points
+    pcl::PointXYZRGB CoM_pole_; //extreme point of current cylinder which is closer to plane
 
     //tf
+    Eigen::Affine3d T_B_color_bot;
+    Eigen::Affine3d T_B_color_top;
+    Eigen::Affine3d T_B_pole_;
+    Eigen::Affine3d T_B_world_b;
+    Eigen::Affine3d T_B_world_t;
     tf::TransformListener tf_listener_;
-    Eigen::Affine3d T_B_color_;
-    ros::NodeHandle nh_;
-    ros::Publisher pub_;
 
     //Service
-    ros::ServiceServer service_;
+    int service_called = 0;
     ros::ServiceClient client_;
-
-    //functions
-    void cloud_input_func();
-    void callback_(const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd);
-    //void segmentation_(); //const sensor_msgs::PointCloud2::ConstPtr& cloud_pcd);
-    void tf_transformer(const pcl::PointXYZRGB& point_on_pole);
-    int cylinder_found_(const pcl::PointCloud<PointT>::Ptr &cloud_cylinder, pcl::ModelCoefficients::Ptr &coefficients_cylinder);
-    void cylinder_can_be_pole_(const pcl::PointCloud<PointT>::Ptr &cloud_cylinder);
-    void color_only_cylinders_(const pcl::PointCloud<PointT>::Ptr &cloud_0,const pcl::PointCloud<PointT>::Ptr &cloud_1,const pcl::PointCloud<PointT>::Ptr &cloud_2,const pcl::PointCloud<PointT>::Ptr &cloud_3,const pcl::PointCloud<PointT>::Ptr &cloud_4,const pcl::PointCloud<PointT>::Ptr &cloud_5,const pcl::PointCloud<PointT>::Ptr &cloud_6);
-    bool PoleDet(bachelor_thesis::PoleDet::Request  &req, bachelor_thesis::PoleDet::Response &res);
-    bool StopService_(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response);
-    void publisher_function_();
-    bool Service_2(bachelor_thesis::RecordPC::Request& request, bachelor_thesis::RecordPC::Response& response);
-    bool Service_3(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response);
-
-    void test_function(pcl::PointCloud<PointT>::Ptr &cloud) {
-        std::cerr << "Point Cloud Size test function cloud_: " << cloud->size() << std::endl;
-        cloud_input_->resize(cloud->size ());
-        *cloud_input_ = *cloud;
-        std::cerr << "Point Cloud Size test function cloud_input_ h: " << cloud_input_->size() << std::endl;
-        //cloud_input_func(cloud_input_);
-    }
-
+    ros::ServiceClient client2_;
 };
 
 #endif

@@ -1,0 +1,218 @@
+<?xml version="1.0"?>
+
+<launch>
+  <!-- ************************ -->
+  <!-- ****** Parameters ****** -->
+  <!-- ************************ -->
+  <!-- vehicle config -->
+  <arg name="mav_name"              default="boreas"/> 
+  <arg name="ns_name"               default="geranos"/> 
+  <arg name="model"                 default="$(find rotors_description)/urdf/$(arg mav_name)_base.xacro"/>
+  <arg name="vehicle_config"        default="sim"/>
+
+
+  <arg name="enable_logging"        default="false"/>
+  <arg name="log_file"              default="$(arg mav_name)"/>
+  <arg name="enable_ground_truth"   default="true"/> <!-- false -->
+  <arg name="add_manipulator"       default="false"/>
+  <arg name="add_tether"            default="false"/>
+  
+  <!-- camera -->  <!-- camera position and angle, also change in boreas_base.xacro -->
+  <arg name="add_rgbd_sensor"       default="true"/> 
+  <arg name="use_rviz"              default="true"/>
+  <arg name="pi" default="3.14159"/>
+  <arg name="cam_x" default="0.18"/>
+  <arg name="cam_y" default="0.0"/>
+  <arg name="cam_z_top" default="-0.15"/>
+  <arg name="cam_z_bottom" default="-0.2565"/>
+  
+
+  <!-- simulation config -->
+  <arg name="world_name"            default="room_world_2"/> <!--room_world_1 or room_world_2 or room_world_3-->
+  <arg name="debug"                 default="false"/>
+  <arg name="gui"                   default="true"/>
+  <arg name="paused"                default="false"/>
+  <arg name="verbose"               default="false"/><!-- false -->
+
+    <!-- controller config -->
+  <!-- control module options:
+  estimator:            estimates external disturbances on the platform
+  wrench_sensor_filter: filters force/torques sensor measurements
+  impedance:            impedance control module
+  allocation:           allocates wrench to actuator commands -->
+  <arg name="control_modules"       value="[impedance, allocation_geranos]"/>
+  <arg name="px4_sitl"              default="false"/>
+
+
+  <arg name="waypoint_file_name"    default="eval_traj_small.yaml"/>
+
+  <arg name="odometry_topic_direct" default="odometry_sensor1"/>
+  <arg name="odometry_topic_msf"    default="msf_core"/> <!-- Options: odometry_sensor1, ground_truth, msf_core -->
+  <arg name="wrench_sensor_topic"   default="wrench_vector"/> 
+  <arg name="world_frame_name"      default="world"/>
+
+  <arg name="dir_param_files"       value="$(find mav_startup)/parameters/mavs"/>
+  
+  <arg name="ctrl-sliders"          default="true"/>
+
+
+
+  <!-- ************************ -->
+  <!-- ****** Simulation ****** -->
+  <!-- ************************ -->
+  <!-- ***** GAZEBO ***** -->
+  <env name="GAZEBO_MODEL_PATH" value="${GAZEBO_MODEL_PATH}:$(find rotors_gazebo)/models:$(find mav_description)"/>
+  <env name="GAZEBO_RESOURCE_PATH" value="${GAZEBO_RESOURCE_PATH}:$(find rotors_gazebo)/models"/>
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(find bachelor_thesis)/worlds/$(arg world_name).world"/>
+    <arg name="debug" value="$(arg debug)"/>
+    <arg name="paused" value="$(arg paused)"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="verbose" value="$(arg verbose)"/>
+  </include>
+
+
+  <!-- Spawn MAV. -->
+  <include file="$(find mav_startup)/launch/simulation/spawn_overactuated_mav.launch">
+    <arg name="mav_name" value="$(arg mav_name)"/>
+    <arg name="namespace" value="$(arg ns_name)"/>
+    <arg name="model" value="$(arg model)"/>
+    <arg name="enable_logging" value="$(arg enable_logging)"/>
+    <arg name="enable_ground_truth" value="$(arg enable_ground_truth)"/>
+    <arg name="log_file" value="$(arg log_file)"/>
+    <arg name="add_manipulator" value="$(arg add_manipulator)"/>
+    <arg name="add_tether" value="$(arg add_tether)"/>
+    <arg name="add_rgbd_sensor" value="$(arg add_rgbd_sensor)"/>
+  </include>
+
+  <!-- ********************** -->
+  <!-- ***** Controller ***** -->
+  <!-- ********************** -->
+   <group ns="$(arg ns_name)">
+    <node name="controller_node" pkg="rw_control_interface" type="controller_node"  respawn="true" clear_params="true" output="screen">
+      <remap from="odometry" to="$(arg odometry_topic_msf)/odometry" />
+      <remap from="command/wrench" to="wrench_target" />
+      <remap from="rc" to="mavros/rc/in" />
+      <remap from="wrench_sensor" to="$(arg wrench_sensor_topic)" />
+      
+      <rosparam file="$(arg dir_param_files)/$(arg mav_name)/vehicle_params_$(arg mav_name).yaml"/>
+      <rosparam file="$(arg dir_param_files)/$(arg mav_name)/rotor_configuration_$(arg mav_name).yaml"/>
+      <rosparam file="$(find rw_control_interface)/resources/control_params.yaml"/>
+      <rosparam file="$(find rw_control_interface)/resources/rc_aci_params.yaml"/>
+      <rosparam file="$(find rw_omav_controllers)/resources/impedance_module_params_$(arg vehicle_config).yaml"/>
+      <rosparam file="$(find rw_geranos_allocators)/resources/allocation_module_params.yaml" />
+      <rosparam param="modules" subst_value="True">$(arg control_modules)</rosparam>
+      
+      <param name="verbose" value="true" />
+      <param name="reference_frame" value="world" />
+      <param name="px4" value="$(arg px4_sitl)" />
+      <param name="capability_group" value="Control" />
+    </node>
+  </group> 
+
+  <!-- *************** -->
+  <!-- ***** MSF ***** -->
+  <!-- *************** -->
+  <group ns="$(arg ns_name)">
+    <node name="pose_sensor" pkg="msf_updates" type="pose_sensor" clear_params="true" output="screen">
+      <remap from="msf_updates/transform_input" to="$(arg odometry_topic_direct)/transform" />
+      <remap from="msf_core/imu_state_input" to="imu" />
+      <rosparam file="$(arg dir_param_files)/$(arg ns_name)/msf_parameters_$(arg vehicle_config).yaml"/>
+      <param name="capability_group" value="StateEstimation" />
+    </node>
+  </group>
+
+  <!-- ************************** -->
+  <!-- ***** Ground Station ***** -->
+  <!-- ************************** -->
+  <group ns="$(arg ns_name)">
+  
+  <!-- ***** Local Planner ***** -->
+    <arg name="write_trajectory_filename" default="$(env HOME)/sampled_trajectory.txt"/>
+    <arg name="write_trajectory" default="false"/>
+
+    <node name="local_planner" pkg="omav_local_planner" type="omav_trajectories_node" output="screen" clear_params="true">
+      <rosparam file="$(find omav_local_planner)/resource/omav_local_planner_params.yaml"/>
+      <param name="world_frame_name" value="$(arg world_frame_name)" />
+      <param name="write_trajectory_filename" value="$(arg write_trajectory_filename)" />
+      <param name="waypoints_filename" value="$(find omav_local_planner)/resource/$(arg waypoint_file_name)" />
+      <param name="write_trajectory" value="$(arg write_trajectory)" />
+      <remap from="odometry" to="$(arg odometry_topic_msf)/odometry"/>
+      <param name="capability_group" value="Planning" />
+    </node>
+
+  <!-- ***** Sliders ***** -->
+    <group if="$(arg ctrl-sliders)">
+      <node name="full_pose_waypoint_node" pkg="omni_navigation_tools" type="full_pose_waypoint_node" output="screen">
+        <param name="odometry_topic" value="$(arg odometry_topic_msf)/odometry"/>
+        <param name="world_frame_name" value="$(arg world_frame_name)"/>
+        <param name="capability_group" value="Planning" />
+      </node>
+    </group>
+
+  <!-- ***** Geranos Planner ***** -->
+  <node pkg="geranos_pole_trajectory" name="geranos_planner" type="pole_trajectory_node" output="screen">
+    <remap from="odometry" to="$(arg odometry_topic_msf)/odometry"/>
+    <param name="capability_group" value="Planning" />
+  </node>
+
+  <!-- ***** RQT ***** -->
+    <node name="rqt_reconfig" pkg="rqt_reconfigure" type="rqt_reconfigure" output="screen"/>
+    
+
+  <!-- ***** GUI ***** -->
+  <node pkg="geranos_gui_$(arg vehicle_config)" name="geranos_gui_$(arg vehicle_config)" type="geranos_gui_$(arg vehicle_config).py" output="screen">
+    <param name="allow_arming" value="true"/>
+  </node>
+  </group>
+
+ <!-- ******************* -->
+  <!-- ***** Sensing ***** -->
+  <!-- ******************* -->
+  <group ns="$(arg mav_name)">
+    <!-- ***** RGBD Camera ***** -->
+    <group if="$(arg add_rgbd_sensor)" ns="camera">
+      
+      <group ns="bottom">
+        <include file="$(find realsense_gazebo_plugin)/launch/D435_depth_proc.launch" />
+        <node pkg="tf" type="static_transform_publisher" name="realsense_link_broadcaster" 
+            args="$(arg cam_x) $(arg cam_y) $(arg cam_z_bottom) -0.4304593 0.4304593 -0.5609855 0.5609855 $(arg mav_name)/base_link bottom/color 10" /> <!-- bottom/color --> <!-- 0 75 -90-->
+      </group>
+
+      <group ns="top">
+        <include file="$(find realsense_gazebo_plugin)/launch/D435_depth_proc.launch"/>
+        <node pkg="tf" type="static_transform_publisher" name="realsense_link_broadcaster" 
+            args="$(arg cam_x) $(arg cam_y) $(arg cam_z_top) -0.5416752 0.5416752 -0.4545195 0.4545195  $(arg mav_name)/base_link top/color 10" /> <!-- -180 80 90-->
+      </group>
+
+      <node pkg="topic_tools" type="relay" name="relay_pointcloud_bottom" args="bottom/depth_registered/points pointclouds" />
+      <node pkg="topic_tools" type="relay" name="relay_pointcloud_top" args="top/depth_registered/points pointclouds" />
+
+    </group>
+  </group> 
+
+  <!-- pcd pole segmentation -->
+  <node name="cy_segmentation" pkg="bachelor_thesis" type="cy_segmentation" output="screen"/> <!-- pole_segmentation or test_node--> <!--  launch-prefix="valgrind" -->
+
+  <!-- ***** Record Pointclouds ***** -->
+  <node name="record_pointcloud_trajectory" pkg="trajectory_pointcloud_bt" type="record_pointcloud_trajectory" output="screen">
+    <remap from="/odometry" to="/geranos/transformed_odometry"/> 
+  </node>
+
+  <!-- Open rviz 
+  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find bachelor_thesis)/rviz/camera.rviz" required="true">
+      <remap from="/camera/depth/color/points" to="D435/camera/depth_registered/points"/>
+      <remap from="/camera/depth/image_rect_raw" to="D435/camera/color/image_raw"/>
+      <remap from="/camera/depth/camera_info" to="D435/camera/color/camera_info"/>
+  </node> -->
+
+  <!-- *************** -->
+  <!-- ***** TFs ***** -->
+  <!-- *************** -->
+  <node pkg="tf2_ros" type="static_transform_publisher" name="tf_base_imu" args="0 0 0 0 0 0 1.0 base imu" />
+  <node pkg="tf2_ros" type="static_transform_publisher" name="tf_ns_mav_bases" args="0 0 0 0 0 0 1.0 $(arg ns_name)/base_link $(arg mav_name)/base_link" />
+
+
+</launch>
+
+<!-- rosnode: publish coordinates -->
